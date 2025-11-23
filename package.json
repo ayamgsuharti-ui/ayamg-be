@@ -7,7 +7,8 @@
     "dev": "ts-node src/server.ts",
     "start": "node dist/server.js",
     "build": "tsc",
-    "watch": "ts-node src/server.ts"
+    "watch": "ts-node src/server.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "6.14.0",
