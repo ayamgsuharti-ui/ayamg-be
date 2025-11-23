@@ -1,0 +1,63 @@
+
+export async function checkOrderStatus(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const numericId = parseInt(id);
+
+    const order = await prisma.orders.findUnique({
+      where: { id: numericId },
+      include: { pembayaran: true }
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: "Pesanan tidak ditemukan" });
+    }
+
+    if (order.status_pembayaran === 'LUNAS') {
+      return res.json({ message: "Pesanan sudah lunas", status: 'LUNAS' });
+    }
+
+    // Call Pakasir API
+    const slug = process.env.PAKASIR_PROJECT_SLUG;
+    const apiKey = process.env.PAKASIR_API_KEY;
+    const amount = Math.ceil(order.total_harga);
+    
+    // Pakasir API URL
+    const url = `https://app.pakasir.com/api/transactiondetail?project=${slug}&amount=${amount}&order_id=${order.id}&api_key=${apiKey}`;
+
+    console.log("Checking Pakasir Status:", url);
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    console.log("Pakasir Response:", data);
+
+    if (data && data.transaction && data.transaction.status === 'completed') {
+       // Update to LUNAS
+       await prisma.orders.update({
+        where: { id: numericId },
+        data: {
+          status_pembayaran: 'LUNAS',
+          status_pesanan: 'PESANAN_DITERIMA', 
+        },
+      });
+
+      // Update payment record if exists, or create one
+      const pembayaran = await prisma.pembayaran.findFirst({ where: { order_id: numericId } });
+      if (pembayaran) {
+          await prisma.pembayaran.update({
+              where: { id: pembayaran.id },
+              data: { status: 'SUCCESS' }
+          });
+      }
+
+      return res.json({ message: "Pembayaran berhasil dikonfirmasi", status: 'LUNAS' });
+    }
+
+    return res.json({ message: "Pembayaran belum diterima", status: order.status_pembayaran });
+
+  } catch (error) {
+    console.error("Error checking order status:", error);
+    res.status(500).json({ message: "Gagal mengecek status pembayaran" });
+  }
+}
